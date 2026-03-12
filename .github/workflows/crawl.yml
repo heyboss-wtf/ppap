@@ -72,6 +72,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @heyboss/crawlers...
 
+      - name: Install Puppeteer Chrome (ITViec only)
+        if: matrix.source == 'itviec'
+        run: pnpm --filter @heyboss/crawlers exec puppeteer browsers install chrome
+
       - name: Install Playwright browsers (JobStreet only)
         if: matrix.source == 'jobstreet'
         run: pnpm --filter @heyboss/crawlers exec playwright install chromium --with-deps
