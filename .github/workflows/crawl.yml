@@ -4,7 +4,6 @@
 # Required secrets in the PUBLIC repo:
 #   PRIVATE_REPO_PAT  - GitHub PAT with access to the private heyboss-wtf repo
 #   CRAWL_API_KEY     - API key to authenticate with the HeyBoss API
-#   . .
 
 name: Crawl Companies
 
@@ -72,7 +71,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @heyboss/crawlers...
 
-      - name: Install Playwright browsers
+      - name: Install Playwright browsers (JobStreet only)
         if: matrix.source == 'jobstreet'
         run: pnpm --filter @heyboss/crawlers exec playwright install chromium --with-deps
 
@@ -85,7 +84,7 @@ jobs:
           fi
 
       - name: Crawl ${{ matrix.source }}
-        run: pnpm --filter @heyboss/crawlers crawl:${{ matrix.source }}
+        run: pnpm --filter @heyboss/crawlers crawl:companies:${{ matrix.source }}
         env:
           API_URL: ${{ env.API_URL }}
           CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
