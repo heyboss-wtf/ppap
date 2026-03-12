@@ -1,0 +1,91 @@
+# This workflow is synced to the public repository by sync-crawl-workflows.yml
+# It runs in the PUBLIC repo and clones the PRIVATE repo to execute crawlers.
+#
+# Required secrets in the PUBLIC repo:
+#   PRIVATE_REPO_PAT  - GitHub PAT with access to the private heyboss-wtf repo
+#   CRAWL_API_KEY     - API key to authenticate with the HeyBoss API
+#   . .
+
+name: Crawl Companies
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Run a specific source only (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - itviec
+          - vietnamworks
+          - jobstreet
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Setup Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      sources: ${{ steps.set-matrix.outputs.sources }}
+    steps:
+      - name: Determine sources to crawl
+        id: set-matrix
+        run: |
+          INPUT_SOURCE="${{ github.event.inputs.source }}"
+          if [[ -n "$INPUT_SOURCE" ]]; then
+            echo "sources=[\"$INPUT_SOURCE\"]" >> $GITHUB_OUTPUT
+          else
+            echo 'sources=["itviec","vietnamworks","jobstreet"]' >> $GITHUB_OUTPUT
+          fi
+
+  crawl:
+    name: Crawl ${{ matrix.source }}
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJson(needs.setup.outputs.sources) }}
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v6
+        with:
+          repository: tuanngocptn/heyboss-wtf
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --filter @heyboss/crawlers...
+
+      - name: Install Playwright browsers
+        if: matrix.source == 'jobstreet'
+        run: pnpm --filter @heyboss/crawlers exec playwright install chromium --with-deps
+
+      - name: Set API URL
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "API_URL=https://api.heyboss.wtf" >> $GITHUB_ENV
+          else
+            echo "API_URL=https://heyboss-api-dev.heyboss.workers.dev" >> $GITHUB_ENV
+          fi
+
+      - name: Crawl ${{ matrix.source }}
+        run: pnpm --filter @heyboss/crawlers crawl:${{ matrix.source }}
+        env:
+          API_URL: ${{ env.API_URL }}
+          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
