@@ -3,7 +3,8 @@
 #
 # Required secrets in the PUBLIC repo:
 #   PRIVATE_REPO_PAT  - GitHub PAT with access to the private heyboss-wtf repo
-#   CRAWL_API_KEY     - API key to authenticate with the HeyBoss API
+#   CRAWL_API_KEY_PROD - API key for production (main branch)
+#   CRAWL_API_KEY_DEV  - API key for development (development branch)
 
 name: Crawl Companies
 
@@ -75,16 +76,18 @@ jobs:
         if: matrix.source == 'jobstreet'
         run: pnpm --filter @heyboss/crawlers exec playwright install chromium --with-deps
 
-      - name: Set API URL
+      - name: Set environment variables
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "API_URL=https://api.heyboss.wtf" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_PROD }}" >> $GITHUB_ENV
           else
             echo "API_URL=https://heyboss-api-dev.heyboss.workers.dev" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_DEV }}" >> $GITHUB_ENV
           fi
 
       - name: Crawl ${{ matrix.source }}
         run: pnpm --filter @heyboss/crawlers crawl:companies:${{ matrix.source }}
         env:
           API_URL: ${{ env.API_URL }}
-          CRAWL_API_KEY: ${{ secrets.CRAWL_API_KEY }}
+          CRAWL_API_KEY: ${{ env.CRAWL_API_KEY }}
