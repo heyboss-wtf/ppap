@@ -60,6 +60,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @heyboss/crawlers...
 
+      - name: Install Puppeteer Chrome
+        run: pnpm --filter @heyboss/crawlers exec puppeteer browsers install chrome
+
       - name: Set environment variables
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
