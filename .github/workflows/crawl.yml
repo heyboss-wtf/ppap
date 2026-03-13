@@ -10,7 +10,7 @@ name: Crawl Companies
 
 on:
   schedule:
-    - cron: '0 2 * * *' # Daily at 2 AM UTC
+    - cron: '0 2 * * 1' # Weekly on Monday at 2 AM UTC
   workflow_dispatch:
     inputs:
       source:
@@ -143,39 +143,15 @@ jobs:
           CRAWL_API_KEY: ${{ env.CRAWL_API_KEY }}
 
   # ===========================================================================
-  # Setup matrix for other sources (vietnamworks, jobstreet)
+  # Discover: browse VietnamWorks listing pages, compute chunk count
   # ===========================================================================
-  setup-other:
-    name: Setup Other Sources
+  discover-vietnamworks:
+    name: Discover VietnamWorks URLs
     runs-on: ubuntu-latest
-    if: inputs.source == '' || inputs.source == 'vietnamworks' || inputs.source == 'jobstreet'
+    if: inputs.source == '' || inputs.source == 'vietnamworks'
     outputs:
-      sources: ${{ steps.set-matrix.outputs.sources }}
-    steps:
-      - name: Determine sources to crawl
-        id: set-matrix
-        run: |
-          INPUT_SOURCE="${{ inputs.source }}"
-          if [[ "$INPUT_SOURCE" == "vietnamworks" ]]; then
-            echo 'sources=["vietnamworks"]' >> $GITHUB_OUTPUT
-          elif [[ "$INPUT_SOURCE" == "jobstreet" ]]; then
-            echo 'sources=["jobstreet"]' >> $GITHUB_OUTPUT
-          else
-            echo 'sources=["vietnamworks","jobstreet"]' >> $GITHUB_OUTPUT
-          fi
-
-  # ===========================================================================
-  # Crawl other sources - single job each
-  # ===========================================================================
-  crawl-other:
-    name: Crawl ${{ matrix.source }}
-    runs-on: ubuntu-latest
-    needs: setup-other
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        source: ${{ fromJson(needs.setup-other.outputs.sources) }}
+      chunks: ${{ steps.discover.outputs.chunks }}
+      total_new: ${{ steps.discover.outputs.total_new }}
     steps:
       - name: Checkout private repo
         uses: actions/checkout@v6
@@ -196,8 +172,117 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @heyboss/crawlers...
 
-      - name: Install Playwright browsers (JobStreet only)
-        if: matrix.source == 'jobstreet'
+      - name: Install Puppeteer Chrome
+        run: pnpm --filter @heyboss/crawlers exec puppeteer browsers install chrome
+
+      - name: Set environment variables
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "API_URL=https://api.heyboss.wtf" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_PROD }}" >> $GITHUB_ENV
+          else
+            echo "API_URL=https://heyboss-api-dev.heyboss.workers.dev" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_DEV }}" >> $GITHUB_ENV
+          fi
+
+      - name: Discover new company URLs
+        id: discover
+        run: |
+          OUTPUT=$(pnpm --filter @heyboss/crawlers crawl:discover:vietnamworks 2>&1)
+          echo "$OUTPUT"
+          CHUNKS=$(echo "$OUTPUT" | grep '^CHUNKS=' | cut -d= -f2)
+          TOTAL_NEW=$(echo "$OUTPUT" | grep '^TOTAL_NEW=' | cut -d= -f2)
+          echo "chunks=${CHUNKS}" >> $GITHUB_OUTPUT
+          echo "total_new=${TOTAL_NEW}" >> $GITHUB_OUTPUT
+        env:
+          API_URL: ${{ env.API_URL }}
+          CRAWL_API_KEY: ${{ env.CRAWL_API_KEY }}
+          CHUNK_SIZE: ${{ env.CHUNK_SIZE }}
+
+  # ===========================================================================
+  # Crawl VietnamWorks: parallel chunks of CHUNK_SIZE companies each
+  # ===========================================================================
+  crawl-vietnamworks:
+    name: Crawl vietnamworks (chunk ${{ matrix.chunk }})
+    runs-on: ubuntu-latest
+    needs: discover-vietnamworks
+    if: needs.discover-vietnamworks.outputs.total_new != '0'
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        chunk: ${{ fromJson(needs.discover-vietnamworks.outputs.chunks) }}
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.PRIVATE_REPO }}
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --filter @heyboss/crawlers...
+
+      - name: Install Puppeteer Chrome
+        run: pnpm --filter @heyboss/crawlers exec puppeteer browsers install chrome
+
+      - name: Set environment variables
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "API_URL=https://api.heyboss.wtf" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_PROD }}" >> $GITHUB_ENV
+          else
+            echo "API_URL=https://heyboss-api-dev.heyboss.workers.dev" >> $GITHUB_ENV
+            echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_DEV }}" >> $GITHUB_ENV
+          fi
+
+      - name: Crawl vietnamworks (chunk ${{ matrix.chunk }})
+        run: |
+          OFFSET=$(( ${{ matrix.chunk }} * ${{ env.CHUNK_SIZE }} ))
+          pnpm --filter @heyboss/crawlers crawl:companies:vietnamworks -- --offset $OFFSET --limit ${{ env.CHUNK_SIZE }}
+        env:
+          API_URL: ${{ env.API_URL }}
+          CRAWL_API_KEY: ${{ env.CRAWL_API_KEY }}
+
+  # ===========================================================================
+  # Crawl JobStreet - single job (no discover step needed yet)
+  # ===========================================================================
+  crawl-jobstreet:
+    name: Crawl jobstreet
+    runs-on: ubuntu-latest
+    if: inputs.source == '' || inputs.source == 'jobstreet'
+    timeout-minutes: 60
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.PRIVATE_REPO }}
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --filter @heyboss/crawlers...
+
+      - name: Install Playwright browsers
         run: pnpm --filter @heyboss/crawlers exec playwright install chromium --with-deps
 
       - name: Set environment variables
@@ -210,8 +295,8 @@ jobs:
             echo "CRAWL_API_KEY=${{ secrets.CRAWL_API_KEY_DEV }}" >> $GITHUB_ENV
           fi
 
-      - name: Crawl ${{ matrix.source }}
-        run: pnpm --filter @heyboss/crawlers crawl:companies:${{ matrix.source }}
+      - name: Crawl jobstreet
+        run: pnpm --filter @heyboss/crawlers crawl:companies:jobstreet
         env:
           API_URL: ${{ env.API_URL }}
           CRAWL_API_KEY: ${{ env.CRAWL_API_KEY }}
