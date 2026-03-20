@@ -260,7 +260,8 @@ jobs:
   discover-topcv:
     name: Discover TopCV URLs
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || inputs.source == 'All source' || inputs.source == 'topcv'
+    # if: github.event_name == 'schedule' || inputs.source == 'All source' || inputs.source == 'topcv'
+    if: false # TODO: re-enable later
     outputs:
       chunks: ${{ steps.discover.outputs.chunks }}
       total_new: ${{ steps.discover.outputs.total_new }}
@@ -318,7 +319,7 @@ jobs:
     name: Crawl topcv (chunk ${{ matrix.chunk }})
     runs-on: ubuntu-latest
     needs: discover-topcv
-    if: needs.discover-topcv.outputs.total_new != '0'
+    if: false # TODO: re-enable later
     timeout-minutes: 60
     strategy:
       fail-fast: false
